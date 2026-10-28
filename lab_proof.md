@@ -2,28 +2,48 @@
 
 ## Project
 
-A LangChain agent connects to HubSpot's hosted MCP server and searches CRM
-company records. The agent answers from the tool result and does not write
-to the CRM.
+A LangChain agent uses two MCP capabilities in one small workflow:
 
-## Workflow
+1. A local stdio MCP server publishes a read-only CRM field guide as a
+   resource.
+2. HubSpot's hosted MCP server exposes a read-only CRM search tool.
 
-1. The MCP client connects to `https://mcp.hubspot.com/` over Streamable HTTP.
-2. `langchain-mcp-adapters` discovers the server's tools and exposes them as
-   LangChain tools.
-3. The LangChain agent receives `search_crm_objects` as its only tool.
-4. The tool searches the HubSpot test account for a company.
-5. The agent returns only the requested company properties.
+The resource explains field semantics; the HubSpot tool is the source of live
+company values. No CRM write operation is exposed to the agent.
 
-Authentication uses a HubSpot OAuth access token loaded locally from `.env`.
-The token is not included in this submission.
+## Setup and workflow
+
+Install the pinned packages from `requirements.txt`. Put the HubSpot OAuth
+access token in a local `.env` file as `HUBSPOT_ACCESS_TOKEN`; do not commit
+that file. The script loads the token from the environment and never prints it.
+
+Run `python mcp_langchain.py`. The script:
+
+1. Starts `crm_context_server.py` as a local MCP stdio subprocess.
+2. Initializes a `ClientSession`, lists the server's resources, and reads
+   `crm://field-guide` with the MCP resource API.
+3. Connects to `https://mcp.hubspot.com/` over Streamable HTTP and discovers
+   its tools through `langchain-mcp-adapters`.
+4. Gives the field guide to a LangChain agent as interpretation context, and
+   gives the agent only the read-only `search_crm_objects` tool.
+5. Prints the resource text and LangChain message/tool trace for inspection.
 
 ## Query
 
 > Find the company named HubSpot. Report its name and domain. If the CRM search
 > returns no matching record, say so.
 
-## Tool call
+## MCP resource evidence
+
+The local server advertises `crm://field-guide`. The text returned by
+`read_resource` includes:
+
+> `name`: the CRM record's company name; use this to identify a company by
+> name. `domain`: the company's internet domain, such as example.org; this is
+> the requested business value in this lab. The guide also says to use the
+> HubSpot search result as the authoritative evidence for actual values.
+
+## MCP tool evidence
 
 Tool: `search_crm_objects`
 
@@ -37,33 +57,47 @@ Input:
 }
 ```
 
-Retrieved evidence
-The MCP tool returned one matching record:
+The captured HubSpot result contained one record with:
+
+```json
 {
   "name": "HubSpot",
   "domain": "hubspot.com"
 }
+```
 
-Internal CRM IDs and record URLs are omitted.
-Final output
+Internal record IDs and record URLs are omitted from this proof.
+
+## Final output
+
 The company named HubSpot has the following properties:
+
 - Name: HubSpot
 - Domain: hubspot.com
 
-Grounding check
-The final answer's name and domain match the values returned by
-search_crm_objects. No additional company facts were used.
-Failure or limitation
-A search for test returned zero records. Searching without a text query
-returned one company, and searching for HubSpot returned that company.
-This demonstrates that an empty search result must not be treated as evidence
-that no relevant record exists: the search phrase and searchable properties
-affect retrieval.
+## Grounding check
 
-The Python configuration currently passes a static access token as a bearer
-header. HubSpot access tokens expire, so a later run may return 401 Unauthorized until the OAuth connection is refreshed. This implementation
-does not automate token refresh.
-Scope
-This Lab proves that a LangChain agent can discover and call a real remote
-MCP tool and produce a response grounded in its result. It does not prove
-integration with an on-premises CRM, email server, or SharePoint deployment.
+The local MCP resource informed the meaning of `name` and `domain` but did not
+provide a company value. Both values in the answer match the HubSpot tool
+result. If the search returns no record, the agent is instructed to report
+that and not infer values from the field guide.
+
+## Failure or limitation
+
+A search for `test` returned zero records, while searching for `HubSpot`
+returned the company. This demonstrates that empty results depend on query
+terms and searchable properties; they do not establish that no relevant
+record exists.
+
+The HubSpot connection currently uses a static OAuth access token in the
+local environment. Tokens expire, so a later run may return `401 Unauthorized`
+until the authorization is refreshed. This example does not automate token
+refresh. The local field guide is static educational context; it does not
+demonstrate reading HubSpot's own business data through an MCP Resource.
+
+## Scope
+
+This lab demonstrates MCP resource discovery and reading, MCP tool discovery
+and use, LangChain tool integration, and an answer grounded in inspectable
+evidence. It does not prove integration with an on-premises CRM, email server,
+or SharePoint deployment.
